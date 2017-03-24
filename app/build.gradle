@@ -1,10 +1,10 @@
-apply plugin: 'com.android.application'
+apply plugin: 'com.android.library'
 
 android {
     compileSdkVersion 25
     buildToolsVersion "25.0.1"
     defaultConfig {
-        applicationId "ufro.com.mozbiisdkandroid2"
+//        applicationId "ufro.com.mozbiisdkandroid2"
         minSdkVersion 18
         targetSdkVersion 25
         versionCode 1
