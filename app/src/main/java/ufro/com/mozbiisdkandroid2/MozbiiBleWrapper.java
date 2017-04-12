@@ -316,6 +316,13 @@ public class MozbiiBleWrapper{
         this.numOfDevice = numOfDevice;
     }
 
+    /**
+     * 取得上一次設置的連線數量
+     */
+    public int getNumOfDevice() {
+        return numOfDevice;
+    }
+
     public int getNumOfConnDevice(){
         return (null == gattList) ? 0 : gattList.size();
     }
