@@ -165,14 +165,6 @@ public class MozbiiBleWrapper{
             if(!isConnected(device.getAddress())) {
                 gattList.add(device.connectGatt(context, false, getBluetoothGattCallback()));
             }
-
-            Log.v(TAG, "gattList.size() / numOfDevice: " +  gattList.size() + " / " + numOfDevice);
-            if(gattList.size() >= numOfDevice){
-                Log.v(TAG, "is ready stop Scan");
-                stopScan();
-            }
-        } else {
-            stopScan();
         }
     }
 
