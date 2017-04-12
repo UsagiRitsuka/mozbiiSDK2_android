@@ -17,7 +17,6 @@ import android.content.Context;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.ParcelUuid;
-import android.support.annotation.Nullable;
 import android.util.Log;
 
 import java.util.ArrayList;
@@ -49,13 +48,9 @@ public class MozbiiBleWrapper{
     private Context context;
     static private BluetoothAdapter bluetoothAdapter;
     static private BluetoothLeScanner bluetoothLeScanner;
-    private int numOfDevice = 0;
+    private int numOfDevice = 1;
     private List<BluetoothGatt> gattList;
     private OnMozibiiListener onMozibiiListener;
-
-    private int scanTimeLimit = 60000; // ms
-
-    private List<BluetoothGattCharacteristic> characteristicList;
 
     public MozbiiBleWrapper(Context context){
         this.context = context;
@@ -65,10 +60,7 @@ public class MozbiiBleWrapper{
     private void init() {
         Log.v(TAG, "init");
 
-        characteristicList = new ArrayList<BluetoothGattCharacteristic>();
         gattList = new ArrayList<BluetoothGatt>();
-
-
         BluetoothManager btMrg = (BluetoothManager) context.getSystemService(Context.BLUETOOTH_SERVICE);
         if (btMrg == null) {
             return;
@@ -85,7 +77,6 @@ public class MozbiiBleWrapper{
             scanCallback = getScanCallback();
             bluetoothLeScanner = bluetoothAdapter.getBluetoothLeScanner();
         }
-
     }
 
     public boolean isBleEnable(){
@@ -134,16 +125,7 @@ public class MozbiiBleWrapper{
         return new BluetoothAdapter.LeScanCallback() {
             @Override
             public void onLeScan(BluetoothDevice device, int rssi, byte[] scanRecord) {
-                if(gattList.size() < numOfDevice){
-                    if(!isConnected(device.getAddress())) {
-                        gattList.add(device.connectGatt(context, false, getBluetoothGattCallback()));
-                    }
-                    if(gattList.size() == numOfDevice){
-                        stopScan();
-                    }
-                } else {
-                    stopScan();
-                }
+                onDeviceScaned(device);
             }
         };
     }
@@ -157,12 +139,7 @@ public class MozbiiBleWrapper{
                     super.onScanResult(callbackType, result);
                     if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                         Log.v(TAG, "onScan, list size: " + gattList.size() + "  addr: " + result.getDevice().getAddress());
-                        if(gattList.size() < numOfDevice){
-                            if(!isConnected(result.getDevice().getAddress())) {
-                                gattList.add(result.getDevice().connectGatt(context, false, getBluetoothGattCallback()));
-                            }
-
-                        }
+                        onDeviceScaned(result.getDevice());
                     }
                 }
 
@@ -182,6 +159,23 @@ public class MozbiiBleWrapper{
         return scanCallback;
     }
 
+
+    synchronized private void onDeviceScaned(BluetoothDevice device){
+        if(gattList.size() < numOfDevice){
+            if(!isConnected(device.getAddress())) {
+                gattList.add(device.connectGatt(context, false, getBluetoothGattCallback()));
+            }
+
+            Log.v(TAG, "gattList.size() / numOfDevice: " +  gattList.size() + " / " + numOfDevice);
+            if(gattList.size() >= numOfDevice){
+                Log.v(TAG, "is ready stop Scan");
+                stopScan();
+            }
+        } else {
+            stopScan();
+        }
+    }
+
     private boolean isConnected(String address){
         if(gattList != null){
             for(BluetoothGatt gatt: gattList){
@@ -198,25 +192,20 @@ public class MozbiiBleWrapper{
         return new BluetoothGattCallback(){
             private List<BluetoothGattCharacteristic> characteristicList = new ArrayList<>();
 
-
             @Override
-            public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
-                super.onCharacteristicChanged(gatt, characteristic);
-                if(INDEX.equals(characteristic.getUuid())){
-                    indexChange(gatt, characteristic);
-                } else if(CUR_RGB_COLOR.equals(characteristic.getUuid())){
-                    colorDetected(gatt, characteristic);
-                }
-            }
-
-            @Override
-            public void onCharacteristicRead(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
-                super.onCharacteristicRead(gatt, characteristic, status);
-                Log.v(TAG, "onCharacteristicRead");
-                if (status == BluetoothGatt.GATT_SUCCESS) {
-                    gatt.setCharacteristicNotification(characteristic, true);
-                    writeDescriptor(characteristic, gatt);
-
+            public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
+                super.onConnectionStateChange(gatt, status, newState);
+                Log.v(TAG, "onConnectionStateChange");
+                if (newState == BluetoothGatt.STATE_CONNECTED) {
+                    // 連線但還不能使用比的功能，因此還不能在此回傳已經連線的訊息
+                    gatt.discoverServices();
+                } else if(newState == BluetoothGatt.STATE_DISCONNECTED){
+                    if(null != onMozibiiListener){
+                        onMozibiiListener.onMozbiiDisconnected(gattList.indexOf(gatt), gatt.getDevice().getAddress());
+                    }
+                    gattList.remove(gatt);
+                    gatt.close();
+                    Log.v(TAG, "gatt close");
                 }
             }
 
@@ -244,16 +233,22 @@ public class MozbiiBleWrapper{
             }
 
             @Override
-            public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
-                super.onConnectionStateChange(gatt, status, newState);
-                Log.v(TAG, "onConnectionStateChange");
-                if (newState == BluetoothGatt.STATE_CONNECTED) {
-                    // 連線但還不能使用比的功能，因此還不能在此回傳已經連線的訊息
-                    gatt.discoverServices();
-                } else if(newState == BluetoothGatt.STATE_DISCONNECTED){
-                    onMozibiiListener.onMozbiiDisconnected(gattList.indexOf(gatt), gatt.getDevice().getAddress());
-                    gatt.close();
-                    Log.v(TAG, "gatt close");
+            public void onCharacteristicRead(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
+                super.onCharacteristicRead(gatt, characteristic, status);
+                Log.v(TAG, "onCharacteristicRead");
+                if (status == BluetoothGatt.GATT_SUCCESS) {
+                    gatt.setCharacteristicNotification(characteristic, true);
+                    writeDescriptor(characteristic, gatt);
+                }
+            }
+
+            @Override
+            public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
+                super.onCharacteristicChanged(gatt, characteristic);
+                if(INDEX.equals(characteristic.getUuid())){
+                    indexChange(gatt, characteristic);
+                } else if(CUR_RGB_COLOR.equals(characteristic.getUuid())){
+                    colorDetected(gatt, characteristic);
                 }
             }
 
@@ -267,7 +262,9 @@ public class MozbiiBleWrapper{
                 } else {
                     // 到此才算真正可以使用筆的功能
                     Log.v(TAG, "real finish connected");
-                    onMozibiiListener.onMozbiiConnected(gattList.indexOf(gatt), gatt.getDevice().getAddress());
+                    if(null != onMozibiiListener) {
+                        onMozibiiListener.onMozbiiConnected(gattList.indexOf(gatt), gatt.getDevice().getAddress());
+                    }
                 }
 
             }
@@ -294,9 +291,9 @@ public class MozbiiBleWrapper{
 
     private void indexChange(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic){
         Integer index = characteristic.getIntValue(FORMAT_UINT8, 0);
-        if(null != index) {
+        if(null != index && null != onMozibiiListener) {
             onMozibiiListener.onMozbiiColorIndexChanged(gattList.indexOf(gatt),
-                    characteristic.getIntValue(FORMAT_UINT8, 0) - 1);
+                characteristic.getIntValue(FORMAT_UINT8, 0) - 1);
         }
     }
 
@@ -305,29 +302,24 @@ public class MozbiiBleWrapper{
         Integer g = characteristic.getIntValue(FORMAT_UINT8, 2);
         Integer b = characteristic.getIntValue(FORMAT_UINT8, 3);
 
-        if(r != null && g != null && b != null) {
+        if(r != null && g != null && b != null && null != onMozibiiListener) {
             onMozibiiListener.onMozbiiColorDetected(gattList.indexOf(gatt), Color.rgb(r, g, b));
         }
     }
 
     /**
-     * 設定想要連線的裝置數
+     * 設定想要連線的裝置數，當連接數達到此數量時會自動停止掃描
+     * 不設置，預設為1
      * @param numOfDevice
      */
     public void setNumOfDevice(int numOfDevice){
         this.numOfDevice = numOfDevice;
-        if(gattList != null && gattList.size() > 0){
-            disConnectAll();
-        }
-
-        gattList = new ArrayList<>(numOfDevice);
     }
 
     public int getNumOfConnDevice(){
         return (null == gattList) ? 0 : gattList.size();
     }
 
-    @Nullable
     public void setOnMozibiiListener(OnMozibiiListener onMozibiiListener){
         this.onMozibiiListener = onMozibiiListener;
     }

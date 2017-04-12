@@ -35,6 +35,16 @@ public class MainActivity extends AppCompatActivity implements OnMozibiiListener
     private Context context;
     private int requireNum = 2;
 
+    private Button conBtn;
+    private Button disconBtn;
+
+    private Runnable stopScan = new Runnable() {
+        @Override
+        public void run() {
+            myService.stopScan();
+        }
+    };
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -54,7 +64,7 @@ public class MainActivity extends AppCompatActivity implements OnMozibiiListener
                 public void onServiceConnected(ComponentName componentName, IBinder iBinder) {
                     Log.v(TAG, "onServiceConnected");
                     myService = ((MyService.MyBinder)iBinder).getService();
-                    myService.setNumOfDevice(3);
+                    myService.setNumOfDevice(requireNum);
                     myService.setOnMozibiiListener(MainActivity.this);
                     if(!myService.isBleEnable()){
                         myService.enableBle();
@@ -65,6 +75,7 @@ public class MainActivity extends AppCompatActivity implements OnMozibiiListener
                         showMsg();
                     } else {
                         myService.startScan();
+                        ThreadManager.getInstance().postToBackgroungThread(stopScan, 20000);
                     }
                 }
 
@@ -77,8 +88,9 @@ public class MainActivity extends AppCompatActivity implements OnMozibiiListener
             };
         }
 
-        Button conBtn = (Button)findViewById(R.id.connect);
-        Button disconBtn = (Button)findViewById(R.id.disconnect);
+        conBtn = (Button)findViewById(R.id.connect);
+        disconBtn = (Button)findViewById(R.id.disconnect);
+        disconBtn.setEnabled(false);
 
         conBtn.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -144,9 +156,17 @@ public class MainActivity extends AppCompatActivity implements OnMozibiiListener
 
     @Override
     public void onMozbiiConnected(int index, String address) {
-        if(myService.getNumOfConnDevice() >= requireNum){
-            myService.stopScan();
-        }
+        ThreadManager.getInstance().postToUIThread(new Runnable() {
+            @Override
+            public void run() {
+                if(myService.getNumOfConnDevice() == requireNum){
+                    conBtn.setEnabled(false);
+                    disconBtn.setEnabled(true);
+                    ThreadManager.getInstance().removeCallbacks(stopScan);
+                }
+            }
+        });
+
     }
 
     @Override
@@ -156,6 +176,10 @@ public class MainActivity extends AppCompatActivity implements OnMozibiiListener
             @Override
             public void run() {
             recycleAdapter.setColorCode(-1, index);
+            if(serviceBound) {
+                myService.startScan();
+                ThreadManager.getInstance().postToBackgroungThread(stopScan, 20000);
+            }
             }
         });
     }
@@ -184,6 +208,9 @@ public class MainActivity extends AppCompatActivity implements OnMozibiiListener
     protected void onDestroy() {
         Log.v(TAG, "onDestroy");
         super.onDestroy();
-        myService.disConnectAll();
+        if(serviceBound) {
+            unbindService(myConnection);
+            serviceBound = false;
+        }
     }
 }
