@@ -195,6 +195,7 @@ public class MozbiiBleWrapper{
                     int index = gattList.indexOf(gatt);
                     gattList.remove(gatt);
                     if(null != onMozibiiListener){
+                        Log.v(TAG, "gattList size: " + gattList.size());
                         onMozibiiListener.onMozbiiDisconnected(index, gatt.getDevice().getAddress());
                     }
 
@@ -215,7 +216,6 @@ public class MozbiiBleWrapper{
                         characteristicList.add(gattColorService.getCharacteristic(CUR_RGB_COLOR));
 
                         if(characteristicList.size() > 0){
-                            Log.v(TAG, "PriorityQueue.size > 0");
                             gatt.readCharacteristic(characteristicList.get(0));
                             characteristicList.remove(0);
                         }
