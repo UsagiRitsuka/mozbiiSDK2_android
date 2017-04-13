@@ -187,7 +187,7 @@ public class MozbiiBleWrapper{
             @Override
             public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
                 super.onConnectionStateChange(gatt, status, newState);
-                Log.v(TAG, "onConnectionStateChange");
+                Log.v(TAG, "onConnectionStateChange: " + newState);
                 if (newState == BluetoothGatt.STATE_CONNECTED) {
                     // 連線但還不能使用比的功能，因此還不能在此回傳已經連線的訊息
                     gatt.discoverServices();
