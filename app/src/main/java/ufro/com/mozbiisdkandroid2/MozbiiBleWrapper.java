@@ -163,7 +163,7 @@ public class MozbiiBleWrapper{
     synchronized private void onDeviceScaned(BluetoothDevice device){
         if(gattList.size() < numOfDevice){
             if(!isConnected(device.getAddress())) {
-                gattList.add(device.connectGatt(context, false, getBluetoothGattCallback()));
+                device.connectGatt(context, false, getBluetoothGattCallback());
             }
         }
     }
@@ -192,10 +192,12 @@ public class MozbiiBleWrapper{
                     // 連線但還不能使用比的功能，因此還不能在此回傳已經連線的訊息
                     gatt.discoverServices();
                 } else if(newState == BluetoothGatt.STATE_DISCONNECTED){
-                    if(null != onMozibiiListener){
-                        onMozibiiListener.onMozbiiDisconnected(gattList.indexOf(gatt), gatt.getDevice().getAddress());
-                    }
+                    int index = gattList.indexOf(gatt);
                     gattList.remove(gatt);
+                    if(null != onMozibiiListener){
+                        onMozibiiListener.onMozbiiDisconnected(index, gatt.getDevice().getAddress());
+                    }
+
                     gatt.close();
                     Log.v(TAG, "gatt close");
                 }
@@ -254,6 +256,7 @@ public class MozbiiBleWrapper{
                 } else {
                     // 到此才算真正可以使用筆的功能
                     Log.v(TAG, "real finish connected");
+                    gattList.add(gatt);
                     if(null != onMozibiiListener) {
                         onMozibiiListener.onMozbiiConnected(gattList.indexOf(gatt), gatt.getDevice().getAddress());
                     }
