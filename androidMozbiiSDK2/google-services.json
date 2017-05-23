@@ -1,0 +1,38 @@
+{
+  "project_info": {
+    "project_number": "429706558545",
+    "project_id": "sample-7a1f1"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:429706558545:android:cd50660ae22a180e",
+        "android_client_info": {
+          "package_name": "poc.wachi.sample"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCYYxrZBS4RxABw6mkrHQN56r5pGKFMAhc"
+        }
+      ],
+      "services": {
+        "analytics_service": {
+          "status": 2,
+          "analytics_property": {
+            "tracking_id": "UA-99352043-1"
+          }
+        },
+        "appinvite_service": {
+          "status": 1,
+          "other_platform_oauth_client": []
+        },
+        "ads_service": {
+          "status": 1
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
