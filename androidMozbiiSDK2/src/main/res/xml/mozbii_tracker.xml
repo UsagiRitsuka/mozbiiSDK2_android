@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!--test-->
     <string name="ga_trackingId" translatable="false">UA-99352043-1</string>
+    <!--official-->
+    <!--<string name="ga_trackingId" translatable="false">UA-52604503-18</string>-->
 </resources>

@@ -49,6 +49,19 @@ public class MozbiiBleWrapper{
     final private UUID FIRMWARE_VERSION = UUID.fromString("00002A26-0000-1000-8000-00805F9B34FB");
     final private UUID BATTERY_LEVEL = UUID.fromString("00002a19-0000-1000-8000-00805f9b34fb");
 
+    final private String GA_SCREEN_CONNECTED = "VS Mozbii Connected"; // screen
+    final private String GA_SCREEN_DISCONNECTED = "VS Mozbii Disconnected"; // screen
+    final private String GA_CATEGORY_USAGE = "Mozbii Usage"; // event-category
+    final private String GA_ACTION_COLOR_PICKED = "Color Picked"; // event-action
+    final private String GA_LABEL_DETECT_CLICKED = "Color detect Clicked"; // event-label
+    final private String GA_LABEL_UP_BUTTON_CLICKED = "Up button Clicked"; // event-label
+    final private String GA_LABEL_DOWN_BUTTON_CLICKED = "Down button Clicked"; // event-label
+    final private String GA_CATEGORY_CONN = "Connections"; // event-category
+    final private String GA_ACTION_CONECT = "Mozbii Connect"; // event-action
+    final private String GA_ACTION_DISCONECT = "Mozbii Disconnect"; // event-action
+    final private String GA_CATEGORY_HARDWARE = "Hardware";
+    final private String GA_ACTION_SERIAL = "Serial";
+
     final private String XPLORE = "SP104";
     final private String PILLAR = "SP100";
     // EVENT characteristic value
@@ -72,8 +85,10 @@ public class MozbiiBleWrapper{
     private OnMozbiiClickedListener onMozbiiClickedListener;
     private OnMozbiiBatterryListener onMozbiiBatterryListener;
     private long time = 0;
+    private boolean isConnected = false;
     private boolean isConnecting = false;
 
+    private int index = 0;
     private int[] colorArray = new int[12];
     // mRGBCharGatt會打三次CharacteristicChange，會傳size 12 的 array，每次更新四個顏色，全部更新完才能打callback回去
     private int counterOfColorSet = 0;
@@ -82,17 +97,26 @@ public class MozbiiBleWrapper{
     private String packageName;
     private static GoogleAnalytics analytics;
     private static Tracker tracker;
+
+    private int retryTime = 0;
+
     public MozbiiBleWrapper(Context context){
         this.context = context;
         packageName = context.getPackageName();
 
+//        String campaignData = "https://www.example.com/?utm_source=" + packageName + "&utm_medium=android";
+        String campaignData = "https://play.google.com/store/apps/details?id=xxx&referrer=utm_source%3D"+
+                packageName + "%26utm_medium%3Dtest-unexisted-appId";
         analytics = GoogleAnalytics.getInstance(context);
         if (tracker == null) {
             tracker = analytics.newTracker(
                 context.getResources().getIdentifier("mozbii_tracker", "xml", context.getPackageName())
             );
 
-
+            tracker.send(new HitBuilders.ScreenViewBuilder()
+                .setCampaignParamsFromUrl(campaignData)
+                .build()
+            );
         }
 
         init();
@@ -119,6 +143,7 @@ public class MozbiiBleWrapper{
             bluetoothLeScanner = bluetoothAdapter.getBluetoothLeScanner();
         }
     }
+
     public boolean isBleEnable(){
         return bluetoothAdapter.isEnabled();
     }
@@ -128,15 +153,9 @@ public class MozbiiBleWrapper{
     }
 
     public void startScan(){
-//        tracker.send(new HitBuilders.EventBuilder()
-//                .setCategory("MozbiiAction-" + (TextUtils.isEmpty(packageName) ? "NULL" : packageName))
-//                .setAction("startScan")
-//                .build());
         if(Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
-            Log.v(TAG, "startScan(sdk less than Lollipop)");
             bluetoothAdapter.startLeScan(new UUID[]{COLOR_PEN}, leScanCallback);
         } else{
-            Log.v(TAG, "startScan(sdk at least Lollipop) add");
             List<ScanFilter> scanFilterList = new ArrayList<ScanFilter>();
             scanFilterList.add(new ScanFilter.Builder().setServiceUuid(new ParcelUuid(COLOR_PEN)).build());
             ScanSettings scanSettings = new ScanSettings.Builder()
@@ -148,6 +167,7 @@ public class MozbiiBleWrapper{
 
     public void stopScan(){
         Log.v(TAG, "stopScan");
+        isConnecting = false;
         if(Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
             bluetoothAdapter.stopLeScan(leScanCallback);
         } else{
@@ -177,7 +197,6 @@ public class MozbiiBleWrapper{
                 @Override
                 public void onScanResult(int callbackType, ScanResult result) {
                     super.onScanResult(callbackType, result);
-                    Log.v(TAG, "onScanResult");
                     if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                         time = System.currentTimeMillis();
                         onDeviceScaned(result.getDevice());
@@ -199,12 +218,11 @@ public class MozbiiBleWrapper{
         return scanCallback;
     }
 
-
     synchronized private void onDeviceScaned(BluetoothDevice device){
         Log.v(TAG, "onDeviceScaned: " + device.getName());
         if(!isConnecting) {
             isConnecting = true;
-            Log.v(TAG, "device name: " + device.getName());
+            Log.v(TAG, "connect device name: " + device.getName());
             time = System.currentTimeMillis();
             device.connectGatt(context, false, getBluetoothGattCallback());
         }
@@ -212,53 +230,61 @@ public class MozbiiBleWrapper{
 
     private BluetoothGattCallback getBluetoothGattCallback(){
         return new BluetoothGattCallback(){
+            private BluetoothGattCharacteristic rgbArrayCh;
             private List<BluetoothGattCharacteristic> characteristicList = new ArrayList<>();
 
             @Override
             public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
                 super.onConnectionStateChange(gatt, status, newState);
-                Log.v(TAG, "onConnectionStateChange, cost: " + Double.toString((System.currentTimeMillis() - time) / 1000d));
+//                Log.v(TAG, "onConnectionStateChange, cost: " + Double.toString((System.currentTimeMillis() - time) / 1000d));
                 time = System.currentTimeMillis();
                 if(status == BluetoothGatt.GATT_SUCCESS){
                     if (newState == BluetoothProfile.STATE_CONNECTED) {
+                        Log.v(TAG, "discoverServices");
                         // 連線但還不能使用比的功能，因此還不能在此回傳已經連線的訊息
                         bluetoothGatt = gatt;
                         gatt.discoverServices();
                     } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                        if (null != onMozbiiListener) {
-                            tracker.setScreenName(packageName + "-disconnected");
-                            tracker.send(new HitBuilders.ScreenViewBuilder().build());
-                            onMozbiiListener.onMozbiiDisconnected();
-                        }
-
+                        Log.v(TAG, "STATE_DISCONNECTED");
+                        onDisconnect();
                         gatt.close();
-                        Log.v(TAG, "gatt close");
+                        isConnecting = false;
                     }
                 } else{
-                    Log.v(TAG, "onConnectionStateChange fail");
-                    if (null != onMozbiiListener) {
-                        tracker.setScreenName(packageName + "-disconnected");
-                        tracker.send(new HitBuilders.ScreenViewBuilder().build());
-                        onMozbiiListener.onMozbiiDisconnected();
-                    }
-
+                    Log.v(TAG, "not GATT_SUCCESS");
+                    onDisconnect();
                     gatt.close();
+                    isConnecting = false;
                 }
-
-                isConnecting = false;
             }
 
             @Override
             public void onServicesDiscovered(BluetoothGatt gatt, int status) {
                 super.onServicesDiscovered(gatt, status);
                 if (status == BluetoothGatt.GATT_SUCCESS) {
-                    Log.v(TAG, "onServicesDiscovered GATT_SUCCESS, cost: " + Double.toString((System.currentTimeMillis() - time) / 1000d));
+                    Log.v(TAG, "onDiscoverServices");
+//                    Log.v(TAG, "onServicesDiscovered GATT_SUCCESS, cost: " + Double.toString((System.currentTimeMillis() - time) / 1000d));
                     time = System.currentTimeMillis();
 
-                    BluetoothGattService gattService = gatt.getService(COLOR_PEN);
+                    BluetoothGattService gattService;
+
+                    gattService = gatt.getService(COLOR_PEN_INFO);
+                    if(gattService != null) {
+                        BluetoothGattCharacteristic ch = gattService.getCharacteristic(FIRMWARE_VERSION);
+                        if(ch != null){
+                            characteristicList.add(ch);
+                        }
+
+                        ch = gattService.getCharacteristic(SERIAL_NUMBER);
+                        if(ch != null){
+                            characteristicList.add(ch);
+                        }
+                    }
+
+                    gattService = gatt.getService(COLOR_PEN);
                     if(gattService != null){
-                        characteristicList.add(gattService.getCharacteristic(INDEX));
-                        characteristicList.add(gattService.getCharacteristic(RGB_COLOR));
+//                        characteristicList.add(gattService.getCharacteristic(RGB_COLOR));
+                        characteristicList.add(gattService.getCharacteristic(CUR_RGB_COLOR));
                         characteristicList.add(gattService.getCharacteristic(EVENT));
                     }
 
@@ -267,49 +293,43 @@ public class MozbiiBleWrapper{
                         characteristicList.add(gattService.getCharacteristic(BATTERY_LEVEL));
                     }
 
-                    gattService = gatt.getService(COLOR_PEN_INFO);
-                    if(gattService != null) {
-                        characteristicList.add(gattService.getCharacteristic(FIRMWARE_VERSION));
-                        gatt.readCharacteristic(gattService.getCharacteristic(SERIAL_NUMBER));
-                    }
+                    checkIsFinishConnected(gatt);
                 } else if(status == BluetoothGatt.GATT_FAILURE){
-                    Log.v(TAG, "GATT_FAILURE");
+                    isConnecting = false;
                 }
             }
 
             @Override
             public void onCharacteristicRead(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
                 super.onCharacteristicRead(gatt, characteristic, status);
-                Log.v(TAG, "onCharacteristicRead");
-
                 if (status == BluetoothGatt.GATT_SUCCESS) {
+                    Log.v(TAG, "onCharacteristicRead");
                     if(SERIAL_NUMBER.equals(characteristic.getUuid())){
                         penSerial = characteristic.getStringValue(0);
+                        sendEventGA(GA_CATEGORY_HARDWARE, GA_ACTION_SERIAL, penSerial);
                         checkIsFinishConnected(gatt);
                     } else if(FIRMWARE_VERSION.equals(characteristic.getUuid())){
                         firmwareVersion = characteristic.getStringValue(0);
                         checkIsFinishConnected(gatt);
-                    }
-                    else {
-                        Log.v(TAG, "onCharacteristicRead GATT_SUCCESS, cost: " + Double.toString((System.currentTimeMillis() - time) / 1000d));
+                    }  else {
+//                      Log.v(TAG, "onCharacteristicRead GATT_SUCCESS, cost: " + Double.toString((System.currentTimeMillis() - time) / 1000d));
                         time = System.currentTimeMillis();
                         gatt.setCharacteristicNotification(characteristic, true);
                         writeDescriptor(characteristic, gatt);
                     }
+                } else{
+                    Log.v(TAG, "onCharacteristicRead fail");
+                    isConnecting = false;
                 }
             }
 
             @Override
             public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
                 super.onCharacteristicChanged(gatt, characteristic);
-
-                if(INDEX.equals(characteristic.getUuid())){
-                    indexChange(characteristic);
-                } else if(CUR_RGB_COLOR.equals(characteristic.getUuid())){
-                    Log.v(TAG, "CUR_RGB_COLOR");
+                Log.v(TAG, "onCharacteristicChanged");
+                if(CUR_RGB_COLOR.equals(characteristic.getUuid())){
                     colorDetected(characteristic);
                 } else if(RGB_COLOR.equals(characteristic.getUuid())) {
-                    Log.v(TAG, "RGB_COLOR");
                     colorArrayDetected(characteristic);
                 } else if(BATTERY_LEVEL.equals(characteristic.getUuid())){
                     if(onMozbiiBatterryListener != null){
@@ -320,52 +340,28 @@ public class MozbiiBleWrapper{
                 }
             }
 
+
             @Override
             public void onDescriptorWrite(BluetoothGatt gatt, BluetoothGattDescriptor descriptor, int status) {
                 super.onDescriptorWrite(gatt, descriptor, status);
-                Log.v(TAG, "onDescriptorWrite");
+
                 if (status == BluetoothGatt.GATT_SUCCESS) {
-                    isConnecting = false;
-                    Log.v(TAG, "onDescriptorWrite, cost: " + Double.toString((System.currentTimeMillis() - time) / 1000d));
+                    Log.v(TAG, "onDescriptorWrite success");
+//                    Log.v(TAG, "onDescriptorWrite, cost: " + Double.toString((System.currentTimeMillis() - time) / 1000d));
                     time = System.currentTimeMillis();
                     checkIsFinishConnected(gatt);
-                }
-
-            }
-
-            @Override
-            public void onDescriptorRead(BluetoothGatt gatt, BluetoothGattDescriptor descriptor, int status) {
-                super.onDescriptorRead(gatt, descriptor, status);
-                Log.v(TAG, "onDescriptorRead");
-            }
-
-            /**
-             * 原本設定pillar使用只傳一個顏色的UUID, Xplore使用傳12個顏色的UUID
-             * 因此這裡會判斷要刪除哪個, 不過現在不需要了, 一律使用12個顏色的UUID
-             */
-            private void removeCharacteristic(){
-                if (characteristicList.size() > 0) {
-                    for (int i = 0; i < characteristicList.size(); i++) {
-                        BluetoothGattCharacteristic ch = characteristicList.get(i);
-                        if (PILLAR.equals(penSerial)) {
-                            if (CUR_RGB_COLOR.equals(ch.getUuid())) {
-                                characteristicList.remove(ch);
-                            }
-                        } else if (XPLORE.equals(penSerial)) {
-                            if (RGB_COLOR.equals(ch.getUuid())) {
-                                characteristicList.remove(ch);
-                            }
-                        }
-                    }
+                } else{
+                    Log.v(TAG, "onDescriptorWrite false");
+                    isConnecting = false;
                 }
             }
 
             private void checkIsFinishConnected(BluetoothGatt gatt){
+                Log.v(TAG, "checkIsFinishConnected, remain : " + characteristicList.size());
                 if (characteristicList.size() > 0) {
                     boolean isReadSuccess = gatt.readCharacteristic(characteristicList.get(0));
                     // RGB_COLOR 為不可讀，不會跑onCharacteristicRead()，因此需在此直接set notification & write description
                     if(!isReadSuccess){
-                        Log.v(TAG, "readCharacteristic() return: " + isReadSuccess);
                         gatt.setCharacteristicNotification(characteristicList.get(0), true);
                         writeDescriptor(characteristicList.get(0), gatt);
                     }
@@ -373,44 +369,76 @@ public class MozbiiBleWrapper{
                     characteristicList.remove(0);
                 } else {
                     // 到此才算真正可以使用筆的功能
-                    Log.v(TAG, "real finish connected");
-                    if (null != onMozbiiListener) {
-                        onMozbiiListener.onMozbiiConnected();
-                        tracker.setScreenName(packageName + "-connected!!!");
-                        tracker.send(new HitBuilders.ScreenViewBuilder().build());
+                    Log.v(TAG, "finish connected");
+                    if(rgbArrayCh != null) {
+                        gatt.setCharacteristicNotification(rgbArrayCh, false);
+                        writeDescriptor2Disable(rgbArrayCh, gatt);
+                        rgbArrayCh = null;
+                    } else{
+                        isConnecting = false;
+                        onConnect();
                     }
+                }
+            }
+
+            // official description, 告訴device一旦發生even就送notification
+            private void writeDescriptor(BluetoothGattCharacteristic characteristic, BluetoothGatt gatt){
+                Log.v(TAG, "writeDescriptor");
+                // official
+                BluetoothGattDescriptor descriptor = characteristic.getDescriptor(
+                        UUID.fromString("00002902-0000-1000-8000-00805f9b34fb"));
+                if (descriptor != null) {
+                    byte[] val = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE;
+                    descriptor.setValue(val);
+                    gatt.writeDescriptor(descriptor);
+                }
+            }
+
+            private void writeDescriptor2Disable(BluetoothGattCharacteristic characteristic, BluetoothGatt gatt){
+                // official
+                BluetoothGattDescriptor descriptor = characteristic.getDescriptor(
+                        UUID.fromString("00002902-0000-1000-8000-00805f9b34fb"));
+                if (descriptor != null) {
+                    byte[] val = BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE;
+                    descriptor.setValue(val);
+                    gatt.writeDescriptor(descriptor);
                 }
             }
         };
     }
 
-    // official description, 告訴device一旦發生even就送otification
-    private void writeDescriptor(BluetoothGattCharacteristic characteristic, BluetoothGatt gatt){
-        // official
-        BluetoothGattDescriptor descriptor = characteristic.getDescriptor(
-            UUID.fromString("00002902-0000-1000-8000-00805f9b34fb"));
-        if (descriptor != null) {
-            byte[] val = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE;
-            descriptor.setValue(val);
-            gatt.writeDescriptor(descriptor);
+
+
+    private void onConnect(){
+        sendScreenGA(GA_SCREEN_CONNECTED);
+        sendEventGA(GA_CATEGORY_CONN, GA_ACTION_CONECT, null);
+
+        isConnected = true;
+        if (null != onMozbiiListener) {
+            onMozbiiListener.onMozbiiConnected();
         }
+
     }
 
-    private void indexChange(BluetoothGattCharacteristic characteristic){
-        Integer index = characteristic.getIntValue(FORMAT_UINT8, 0);
-        if(null != index && null != onMozbiiListener) {
-            indexOfColorSet = index - 1;
-            onMozbiiListener.onMozbiiColorIndexChanged(indexOfColorSet);
+    private void onDisconnect(){
+        sendScreenGA(GA_SCREEN_DISCONNECTED);
+        sendEventGA(GA_CATEGORY_CONN, GA_ACTION_DISCONECT, null);
+
+        isConnected =false;
+        if (null != onMozbiiListener) {
+            onMozbiiListener.onMozbiiDisconnected();
         }
     }
 
     private void colorDetected(BluetoothGattCharacteristic characteristic){
+        index = characteristic.getIntValue(FORMAT_UINT8, 0) - 1;
         Integer r = characteristic.getIntValue(FORMAT_UINT8, 1);
         Integer g = characteristic.getIntValue(FORMAT_UINT8, 2);
         Integer b = characteristic.getIntValue(FORMAT_UINT8, 3);
-
+        int color = Color.rgb(r, g, b);
         if(r != null && g != null && b != null && null != onMozbiiListener) {
-            onMozbiiListener.onMozbiiColorDetected(Color.rgb(r, g, b));
+            colorArray[index] = color;
+            onMozbiiListener.onMozbiiColorDetected(color);
         }
     }
 
@@ -436,37 +464,48 @@ public class MozbiiBleWrapper{
             }
         }
 
-
-        if(++counterOfColorSet >= 3) {
-            Log.v(TAG, "colorArrayDetected, index = " + indexOfColorSet);
-            counterOfColorSet = 0;
-            onMozbiiListener.onMozbiiColorArrayDetected(colorArray, indexOfColorSet);
-        }
+        // do-no 當成初始設定使用
+//        if(++counterOfColorSet >= 3) {
+//            Log.v(TAG, "colorArrayDetected, index = " + indexOfColorSet);
+//            counterOfColorSet = 0;
+//            if(onMozbiiListener != null) {
+                //onMozbiiListener.onMozbiiColorArrayDetected(colorArray, indexOfColorSet);
+//            }
+//        }
     }
 
     private void onEvent(BluetoothGattCharacteristic characteristic){
         int value = characteristic.getIntValue(FORMAT_UINT8, 0);
-        Log.v(TAG, "Event: " + value);
+//        Log.v(TAG, "event value: " + value);
         switch (value){
             case UP_BTN_CLICKED:
+                index = --index < 0 ? 11 : index;
                 if(onMozbiiClickedListener != null){
-                    onMozbiiClickedListener.onUpButtonClicked();
+                    onMozbiiClickedListener.onTopButtonClicked();
                 }
+
+                sendEventGA(GA_CATEGORY_USAGE, GA_ACTION_COLOR_PICKED, GA_LABEL_UP_BUTTON_CLICKED);
                 break;
 
             case DOWN_BTN_CLICKED:
+                index = ++index > 11 ? 0 : index;
                 if(onMozbiiClickedListener != null){
-                    onMozbiiClickedListener.onDownButtonClicked();
+                    onMozbiiClickedListener.onBottomButtonClicked();
                 }
+
+                sendEventGA(GA_CATEGORY_USAGE, GA_ACTION_COLOR_PICKED, GA_LABEL_DOWN_BUTTON_CLICKED);
                 break;
 
             case DETECT_BTN_CLICKED:
                 if(onMozbiiClickedListener != null){
                     onMozbiiClickedListener.onDetectButtonClicked();
                 }
+
+                sendEventGA(GA_CATEGORY_USAGE, GA_ACTION_COLOR_PICKED, GA_LABEL_DETECT_CLICKED);
                 break;
 
             case POWER_LOW:
+                Log.v(TAG, "POWER_LOW");
                 if(onMozbiiBatterryListener != null) {
                     onMozbiiBatterryListener.onMozbiiBatteryLevelLow();
                 }
@@ -474,14 +513,41 @@ public class MozbiiBleWrapper{
         }
     }
 
+    private void sendScreenGA(String screenName){
+        tracker.setScreenName(screenName);
+        tracker.send(new HitBuilders.ScreenViewBuilder().build());
+    }
+
+    private void sendEventGA(String category, String action, String label){
+        tracker.send(new HitBuilders.EventBuilder()
+            .setCategory(category)
+            .setAction(action)
+            .setLabel(label)
+            .build());
+    }
+
+    /**
+     * @return "SP104" is XPLORE, "SP100" is PILLAR
+     */
     public String getSerial(){
-        return penSerial;
+        return penSerial == null ? "" : penSerial;
     }
 
+    /**
+     * retren firmware version
+     * @return
+     */
     public String getFirmwareVersion(){
-        return firmwareVersion;
+        return firmwareVersion == null ? "" : firmwareVersion;
     }
 
+    /**
+     * check目前是此bleWrapper目前的連線狀態
+     * @return
+     */
+    public boolean isConnected(){
+        return isConnected;
+    }
 
     public void setOnMozbiiListener(OnMozbiiListener onMozbiiListener){
         this.onMozbiiListener = onMozbiiListener;
@@ -493,5 +559,21 @@ public class MozbiiBleWrapper{
 
     public void setOnMozbiiBatterryListener(OnMozbiiBatterryListener onMozbiiBatterryListener) {
         this.onMozbiiBatterryListener = onMozbiiBatterryListener;
+    }
+
+    /**
+     * 取得初次連線時儲存在筆裡面的色票，隨著使用者吸色動作會更新該色票
+     * @return
+     */
+    public int[] getColorArray(){
+        return colorArray;
+    }
+
+    /**
+     * 取得目前使用的顏色在色票中的index值
+     * @return
+     */
+    public int getIndex(){
+        return index;
     }
 }
