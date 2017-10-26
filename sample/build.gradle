@@ -8,8 +8,8 @@ android {
         applicationId "poc.wachi.sample"
         minSdkVersion 18
         targetSdkVersion 25
-        versionCode 5
-        versionName "1.7"
+        versionCode 6
+        versionName "1.8"
 
         testInstrumentationRunner "android.support.test.runner.AndroidJUnitRunner"
 
